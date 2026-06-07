@@ -1,0 +1,35 @@
+# Build output
+term-raster
+a.out
+*.out
+
+# Object files
+*.o
+*.obj
+
+# Debug symbols (macOS / clang / lldb)
+*.dSYM/
+*.dSYM
+
+# Core dumps
+core
+core.*
+
+# Logs / runtime junk
+*.log
+
+# Editor / IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS system files
+.DS_Store
+
+# Linux temporary files
+*.tmp
+
+# Make artifacts (optional)
+*.mk
