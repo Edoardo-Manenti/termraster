@@ -21,10 +21,6 @@ typedef struct {
 	float y;
 } P2;
 
-P2 add(P2 a, P2 b) {
-	return (P2) {a.x+a.x, a.y+b.y};
-}
-
 typedef struct {
 	float x;
 	float y;
@@ -43,33 +39,47 @@ typedef struct {
 	int num_lines;
 } Model;
 
-void init_model(Model *m, int num_points, int num_lines) {
-	if (num_points) {
-		m->points = malloc(num_points * sizeof(P3));
+int init_model(Model *m, int num_points, int num_lines) {
+	m->points = num_points ? malloc(num_points * sizeof(*m->points)) : NULL;
+	m->lines  = num_lines  ? malloc(num_lines  * sizeof(*m->lines))  : NULL;
+
+	if ((num_points && !m->points) ||
+		(num_lines  && !m->lines)) {
+		free(m->points);
+		free(m->lines);
+		*m = (Model){0};
+		return -1;
 	}
-	if (num_lines) {
-		m->lines = malloc(num_lines * sizeof(Line));
-	}
+
 	m->num_points = num_points;
-	m->num_lines = num_lines;
+	m->num_lines  = num_lines;
+	return 0;
 }
 
-void copy_model(Model *out, Model *m) {
-	if (m->num_points) {
-		out->points = malloc(m->num_points * sizeof(P3));
-		memcpy(out->points, m->points, m->num_points*sizeof(P3));
+int copy_model(Model *dest, const Model *src) {
+	if ((dest->num_points != src->num_points)
+		|| (dest->num_lines != src->num_lines)) {
+		fprintf(stderr, "ERROR: src model and dest model sizes do not match");
+		return -1;
 	}
-	if (m->num_lines) {
-		out->lines = malloc(m->num_lines * sizeof(Line));
-		memcpy(out->lines, m->lines, m->num_lines*sizeof(Line));
+	if (src->num_points) {
+		memcpy(dest->points, src->points, src->num_points*sizeof(P3));
 	}
-	out->num_points = m->num_points;
-	out->num_lines = m->num_lines;
+	if (src->num_lines) {
+		memcpy(dest->lines, src->lines, src->num_lines*sizeof(Line));
+	}
+	dest->num_points = src->num_points;
+	dest->num_lines = src->num_lines;
+	return 0;
 }
 
 void free_model(Model *m) {
 	free(m->points);
 	free(m->lines);
+	m->num_points = 0;
+	m->num_lines = 0;
+	m->points = NULL;
+	m->lines = NULL;
 }
 
 typedef struct {
@@ -83,17 +93,26 @@ typedef struct {
 } View;
 
 int init_view(int width, int height, float focal, char background, View *out) {
+	char* pixels = malloc(width*height*sizeof(char));
+	if (pixels == NULL) {
+		return -1;
+	}
+	float *z_buffer = malloc(width*height*sizeof(float));
+	if (z_buffer == NULL) {
+		free(pixels);
+		return -1;
+	}
+	out->z_buffer = z_buffer;
+	out->pixels = pixels;
 	out->width = width;
 	out->height = height;
-	out->pixels = malloc(width*height*sizeof(char));
-	out->z_buffer = malloc(width*height*sizeof(float));
 	out->center = (P2) {
 		.x = ((float)width)*0.5f,
 		.y = ((float)height)*0.5f
 	};
 	out->focal = focal;
 	out->background = background;
-	memset(out->pixels, background, width*height);
+	memset(pixels, background, width*height);
 	for (int i=0; i < width*height; i++) {
 		out->z_buffer[i] = INFINITY;
 	}
@@ -111,11 +130,17 @@ int clear_view(View *v) {
 void free_view(View *v) {
 	free(v->pixels);
 	free(v->z_buffer);
+	v->pixels = NULL;
+	v->z_buffer = NULL;
+	v->width = 0;
+	v->height = 0;
+	v->center = (P2) {0,0};
+	v->focal = 0;
+	v->background = ' ';
 }
 
 //bottom left point
 int cube(P3 p, float l, Model *out) {
-	init_model(out, 8, 12);
 	float x = p.x;
 	float y = p.y;
 	float z = p.z;
@@ -149,7 +174,6 @@ int cube(P3 p, float l, Model *out) {
 
 //center + radius + density (how many points per 360°)
 int sphere(P3 center, float radius, int density, Model *out) {
-	init_model(out, density*density, 0);
 	float x = center.x;
 	float y = center.y;
 	float z = center.z;
@@ -170,7 +194,7 @@ int sphere(P3 center, float radius, int density, Model *out) {
 	return 0;
 }
 
-int rotate_Y(Model *m, float theta, P3 center, Model *rotated) {
+int rotate_Y(const Model *m, float theta, P3 center, Model *rotated) {
 	for (int i=0; i < m->num_points; i++) {
 		//x' = x cos(theta) - z sin(theta)
 		//y' = y
@@ -294,14 +318,27 @@ void print(View *view) {
 int main() {
 	printf(ED);
 	printf(CU);
+	int rc = 0;
+	Model m = {0};
+	Model rotated = {0};
+	View v = {0};
 
-	View v;
-	init_view(WIDTH, HEIGHT, FL, ASCII_RAMP[0], &v);
-
-	Model m;
-	Model rotated;
+	if (init_view(WIDTH, HEIGHT, FL, ASCII_RAMP[0], &v) != 0) {
+		fprintf(stderr, "ERROR: Could not allocate view\n");
+		rc = 8;
+		goto cleanup;
+	}
+	if(init_model(&m, 8, 12) != 0 || init_model(&rotated, 8, 12) != 0){
+		fprintf(stderr, "ERROR: Could not allocate model");
+		rc = 8;
+		goto cleanup;
+	};
 	cube((P3){-10,-10,200}, 20, &m);
-	copy_model(&rotated, &m);
+	if (copy_model(&rotated, &m) != 0) {
+		fprintf(stderr, "ERROR: Could not copy model");
+		rc = 8;
+		goto cleanup;
+	};
 
 	float theta = 0;
 	while(1) {
@@ -311,8 +348,13 @@ int main() {
 		print(&v);
 		usleep(16 * 1000);
 	}
+
+	//cleanup
+	cleanup:
 	free_model(&m);
 	free_model(&rotated);
 	free_view(&v);
-	return 0;
+	return rc;
+
 }
+
