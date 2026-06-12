@@ -19,73 +19,74 @@
 typedef struct {
 	float x;
 	float y;
-} P2;
+} Vec2;
 
 typedef struct {
 	float x;
 	float y;
 	float z;
-} P3;
+} Vec3;
 
 typedef struct {
 	int a;
 	int b;
-} Line;
+	int c;
+} Triangle;
 
 typedef struct {
-	P3 *points;
-	Line *lines;
-	int num_points;
-	int num_lines;
-} Model;
+	Vec3 *vertices;
+	Triangle *triangles;
+	int num_vertices;
+	int num_triangles;
+} Mesh;
 
-int init_model(Model *m, int num_points, int num_lines) {
-	m->points = num_points ? malloc(num_points * sizeof(*m->points)) : NULL;
-	m->lines  = num_lines  ? malloc(num_lines  * sizeof(*m->lines))  : NULL;
+int init_mesh(Mesh *m, int num_vertices, int num_triangles) {
+	m->vertices = num_vertices ? malloc(num_vertices * sizeof(*m->vertices)) : NULL;
+	m->triangles  = num_triangles  ? malloc(num_triangles  * sizeof(*m->triangles))  : NULL;
 
-	if ((num_points && !m->points) ||
-		(num_lines  && !m->lines)) {
-		free(m->points);
-		free(m->lines);
-		*m = (Model){0};
+	if ((num_vertices && !m->vertices) ||
+		(num_triangles  && !m->triangles)) {
+		free(m->vertices);
+		free(m->triangles);
+		*m = (Mesh){0};
 		return -1;
 	}
 
-	m->num_points = num_points;
-	m->num_lines  = num_lines;
+	m->num_vertices = num_vertices;
+	m->num_triangles  = num_triangles;
 	return 0;
 }
 
-int copy_model(Model *dest, const Model *src) {
-	if ((dest->num_points != src->num_points)
-		|| (dest->num_lines != src->num_lines)) {
+int copy_model(Mesh *dest, const Mesh *src) {
+	if ((dest->num_vertices != src->num_vertices)
+		|| (dest->num_triangles != src->num_triangles)) {
 		fprintf(stderr, "ERROR: src model and dest model sizes do not match");
 		return -1;
 	}
-	if (src->num_points) {
-		memcpy(dest->points, src->points, src->num_points*sizeof(P3));
+	if (src->num_vertices) {
+		memcpy(dest->vertices, src->vertices, src->num_vertices*sizeof(Vec3));
 	}
-	if (src->num_lines) {
-		memcpy(dest->lines, src->lines, src->num_lines*sizeof(Line));
+	if (src->num_triangles) {
+		memcpy(dest->triangles, src->triangles, src->num_triangles*sizeof(Triangle));
 	}
-	dest->num_points = src->num_points;
-	dest->num_lines = src->num_lines;
+	dest->num_vertices = src->num_vertices;
+	dest->num_triangles = src->num_triangles;
 	return 0;
 }
 
-void free_model(Model *m) {
-	free(m->points);
-	free(m->lines);
-	m->num_points = 0;
-	m->num_lines = 0;
-	m->points = NULL;
-	m->lines = NULL;
+void free_model(Mesh *m) {
+	free(m->vertices);
+	free(m->triangles);
+	m->num_vertices = 0;
+	m->num_triangles = 0;
+	m->vertices = NULL;
+	m->triangles = NULL;
 }
 
 typedef struct {
 	int width;
 	int height;
-	P2 center;
+	Vec2 center;
 	float focal;
 	char *pixels;
 	char background;
@@ -106,7 +107,7 @@ int init_view(int width, int height, float focal, char background, View *out) {
 	out->pixels = pixels;
 	out->width = width;
 	out->height = height;
-	out->center = (P2) {
+	out->center = (Vec2) {
 		.x = ((float)width)*0.5f,
 		.y = ((float)height)*0.5f
 	};
@@ -134,46 +135,61 @@ void free_view(View *v) {
 	v->z_buffer = NULL;
 	v->width = 0;
 	v->height = 0;
-	v->center = (P2) {0,0};
+	v->center = (Vec2) {0,0};
 	v->focal = 0;
 	v->background = ' ';
 }
 
-//bottom left point
-int cube(P3 p, float l, Model *out) {
-	float x = p.x;
-	float y = p.y;
-	float z = p.z;
-	
-	out->points[0] = (P3) {x,y,z};
-	out->points[1] = (P3) {x+l,y,z};
-	out->points[2] = (P3) {x+l,y+l,z};
-	out->points[3] = (P3) {x,y+l,z};
-	out->points[4] = (P3) {x,y,z+l};
-	out->points[5] = (P3) {x+l,y,z+l};
-	out->points[6] = (P3) {x+l,y+l,z+l};
-	out->points[7] = (P3) {x,y+l,z+l};
-	
-	int counter = 0;
-	for (int i=0; i < 8; i++) {
-		for (int j=i+1; j < 8; j++) {
-			P3 a = out->points[i];
-			P3 b = out->points[j];
 
-			if ((a.x != b.x && a.y==b.y && a.z==b.z)
-				|| (a.x == b.x && a.y!=b.y && a.z==b.z)
-				|| (a.x == b.x && a.y==b.y && a.z!=b.z)
-			) {
-				out->lines[counter++] = (Line) {i,j};
-			}
-		}
+//bottom left point
+int cube(Vec3 center, float l, Mesh *out) {
+	//check
+	if (out->num_vertices != 8 ||
+		out->num_triangles != 12) {
+		return -1;
 	}
+
+	float x = center.x;
+	float y = center.y;
+	float z = center.z;
+	float h = l*0.5f;
+	
+	out->vertices[0] = (Vec3) {x+h,y+h,z+h};
+	out->vertices[1] = (Vec3) {x+h,y+h,z-h};
+	out->vertices[2] = (Vec3) {x-h,y+h,z-h};
+	out->vertices[3] = (Vec3) {x-h,y+h,z+h};
+	out->vertices[4] = (Vec3) {x+h,y-h,z+h};
+	out->vertices[5] = (Vec3) {x+h,y-h,z-h};
+	out->vertices[6] = (Vec3) {x-h,y-h,z-h};
+	out->vertices[7] = (Vec3) {x-h,y-h,z+h};
+	
+/*
+ *       2-----1
+ *      /|    /|
+ *     3-+---0 |
+ *     | 6---+-5
+ *     |/    |/
+ *     7-----4
+ * */
+
+	out->triangles[0] = (Triangle) {0,4,1};
+	out->triangles[1] = (Triangle) {1,4,5};
+	out->triangles[2] = (Triangle) {1,5,2};
+	out->triangles[3] = (Triangle) {2,5,1};
+	out->triangles[4] = (Triangle) {3,2,6};
+	out->triangles[5] = (Triangle) {3,6,7};
+	out->triangles[6] = (Triangle) {3,7,0};
+	out->triangles[7] = (Triangle) {0,7,4};
+	out->triangles[8] = (Triangle) {2,3,0};
+	out->triangles[9] = (Triangle) {2,0,1};
+	out->triangles[10] = (Triangle) {4,7,6};
+	out->triangles[11] = (Triangle) {4,6,5};
 
 	return 0;
 }
 
-//center + radius + density (how many points per 360°)
-int sphere(P3 center, float radius, int density, Model *out) {
+//center + radius + density (how many vertices per 360°)
+int sphere(Vec3 center, float radius, int density, Mesh *out) {
 	float x = center.x;
 	float y = center.y;
 	float z = center.z;
@@ -184,7 +200,7 @@ int sphere(P3 center, float radius, int density, Model *out) {
 		alpha = (float)i*(step);
 		for (int j = 0; j < density; j++) {
 			beta = (float)j*(step);
-			out->points[counter++] = (P3) {
+			out->vertices[counter++] = (Vec3) {
 				.x = x+radius*sinf(alpha)*cosf(beta), 
 				.y = y+radius*sinf(alpha)*sinf(beta), 
 				.z = z+radius*cosf(alpha)
@@ -194,13 +210,13 @@ int sphere(P3 center, float radius, int density, Model *out) {
 	return 0;
 }
 
-int rotate_Y(const Model *m, float theta, P3 center, Model *rotated) {
-	for (int i=0; i < m->num_points; i++) {
+int rotate_Y(const Mesh *m, float theta, Vec3 center, Mesh *rotated) {
+	for (int i=0; i < m->num_vertices; i++) {
 		//x' = x cos(theta) - z sin(theta)
 		//y' = y
 		//z' = x sin(theta) + z cos(theta)
-		P3 p = m->points[i];
-		rotated ->points[i] = (P3) {
+		Vec3 p = m->vertices[i];
+		rotated ->vertices[i] = (Vec3) {
 			.x = (p.x - center.x)*cosf(theta) - (p.z - center.z)*sinf(theta) + center.x,
 			.y = p.y,
 			.z = (p.x - center.x)*sinf(theta) + (p.z - center.z)*cosf(theta) + center.z
@@ -221,14 +237,14 @@ int p_to_index(View *v, int x, int y) {
 	return y * w + x;
 }
 
-P2 p3_to_p2(P3 p, float f, P2 c) {
-	return (P2) {
+Vec2 p3_to_p2(Vec3 p, float f, Vec2 c) {
+	return (Vec2) {
 		.x = c.x + (f*p.x/p.z)*X_CORRECTION,
 		.y = c.y - (f*p.y/p.z)
 	};
 }
 
-int draw_pixel(View *v, P2 p, float z, int brightness) {
+int draw_pixel(View *v, Vec2 p, float z, int brightness) {
 	int i = p_to_index(v, p.x, p.y);
 	if (i < 0) {
 		return -1;
@@ -240,15 +256,15 @@ int draw_pixel(View *v, P2 p, float z, int brightness) {
 	return 0;
 }
 
-int draw_point(View *v, P3 p, int brightness) {
+int draw_point(View *v, Vec3 p, int brightness) {
 	brightness = brightness > 255? 255 : brightness;
-	P2 pp = p3_to_p2(p, v->focal, v->center);
+	Vec2 pp = p3_to_p2(p, v->focal, v->center);
 		
 	draw_pixel(v, pp, p.z, brightness);
 	return 0;
 }
 
-int draw_line(View *v, P3 a, P3 b, int brightness) {
+int draw_line(View *v, Vec3 a, Vec3 b, int brightness) {
 	brightness = brightness > 255? 255 : brightness;
 	float dx = b.x - a.x;
 	float dy = b.y - a.y;
@@ -268,21 +284,20 @@ int draw_line(View *v, P3 a, P3 b, int brightness) {
 		x += step_x;
 		y += step_y;
 		z += step_z;
-		draw_point(v, (P3){a.x+x,a.y+y,a.z+z}, brightness);
+		draw_point(v, (Vec3){a.x+x,a.y+y,a.z+z}, brightness);
 	}
 	return 0;
 }
 
-void draw(View *view, Model *m) {
+void draw(View *view, Mesh *m) {
 	clear_view(view);
-
-	for(int i=0; i < m->num_points; i++) {
-		draw_point(view, m->points[i], 255);
-	}
-	for(int i=0; i < m->num_lines; i++) {
-		int a = m->lines[i].a;
-		int b = m->lines[i].b;
-		draw_line(view, m->points[a], m->points[b], 255);
+	for(int i=0; i < m->num_triangles; i++) {
+		int a = m->triangles[i].a;
+		int b = m->triangles[i].b;
+		int c = m->triangles[i].c;
+		draw_line(view, m->vertices[a], m->vertices[b], 255);
+		draw_line(view, m->vertices[b], m->vertices[c], 255);
+		draw_line(view, m->vertices[c], m->vertices[a], 255);
 	}
 }
 
@@ -319,8 +334,8 @@ int main() {
 	printf(ED);
 	printf(CU);
 	int rc = 0;
-	Model m = {0};
-	Model rotated = {0};
+	Mesh m = {0};
+	Mesh rotated = {0};
 	View v = {0};
 
 	if (init_view(WIDTH, HEIGHT, FL, ASCII_RAMP[0], &v) != 0) {
@@ -328,12 +343,12 @@ int main() {
 		rc = 8;
 		goto cleanup;
 	}
-	if(init_model(&m, 8, 12) != 0 || init_model(&rotated, 8, 12) != 0){
+	if(init_mesh(&m, 8, 12) != 0 || init_mesh(&rotated, 8, 12) != 0){
 		fprintf(stderr, "ERROR: Could not allocate model");
 		rc = 8;
 		goto cleanup;
 	};
-	cube((P3){-10,-10,200}, 20, &m);
+	cube((Vec3){0,0,200}, 20, &m);
 	if (copy_model(&rotated, &m) != 0) {
 		fprintf(stderr, "ERROR: Could not copy model");
 		rc = 8;
@@ -343,7 +358,7 @@ int main() {
 	float theta = 0;
 	while(1) {
 		theta += 0.5*2*M_PI/60;
-		rotate_Y(&m, theta, (P3){0,0,210}, &rotated);
+		rotate_Y(&m, theta, (Vec3){0,0,200}, &rotated);
 		draw(&v, &rotated);
 		print(&v);
 		usleep(16 * 1000);

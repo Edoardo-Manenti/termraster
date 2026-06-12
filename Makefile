@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -O2
 LDFLAGS = -lm
 
 TARGET = term-raster
-SRC = main.c
+SRC = src/main.c
 
 all: $(TARGET)
 
