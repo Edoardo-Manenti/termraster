@@ -7,7 +7,8 @@
 #define WIDTH 120
 #define HEIGHT 40
 #define FL 200.
-#define X_CORRECTION 2.
+#define X_CORRECTION 2.f
+#define EPSILON 0.0001f
 
 // Escape sequences
 #define ED "\033[2J" //clear screen
@@ -26,6 +27,38 @@ typedef struct {
 	float y;
 	float z;
 } Vec3;
+
+Vec3 mult(Vec3 v, float c) {
+	return (Vec3) {
+		v.x*c,
+		v.y*c,
+		v.z*c,
+	};
+}
+
+Vec3 add(Vec3 a, Vec3 b) {
+	return (Vec3) {
+		a.x + b.x,
+		a.y + b.y,
+		a.z + b.z
+	};
+}
+
+Vec3 sub(Vec3 a, Vec3 b) {
+	return add(a, mult(b, -1.));
+}
+
+Vec3 cross(Vec3 a, Vec3 b) {
+	return (Vec3) {
+		a.y*b.z-b.y*a.z,
+		a.z*b.x-b.z*a.x,
+		a.x*b.y-b.x*a.y
+	};
+}
+
+float dot(Vec3 a, Vec3 b) {
+	return a.x*b.x+a.y*b.y+a.z*b.z;
+}
 
 typedef struct {
 	int a;
@@ -84,16 +117,27 @@ void free_model(Mesh *m) {
 }
 
 typedef struct {
+	Vec3 position;
+	Vec3 forward;
+	Vec3 up;
+	float focal;
+} Camera;
+
+typedef struct {
 	int width;
 	int height;
-	Vec2 center;
-	float focal;
-	char *pixels;
-	char background;
-	float *z_buffer;
-} View;
+	Camera *camera;
+} Scene;
 
-int init_view(int width, int height, float focal, char background, View *out) {
+
+typedef struct {
+	int width;
+	int height;
+	char *pixels;
+	float *z_buffer;
+} FrameBuffer;
+
+int init_scene(int width, int height, float focal, Scene *out, FrameBuffer *fb, Camera *cam) {
 	char* pixels = malloc(width*height*sizeof(char));
 	if (pixels == NULL) {
 		return -1;
@@ -103,43 +147,58 @@ int init_view(int width, int height, float focal, char background, View *out) {
 		free(pixels);
 		return -1;
 	}
-	out->z_buffer = z_buffer;
-	out->pixels = pixels;
+	memset(pixels, ' ', width*height);
+	fb->z_buffer = z_buffer;
+	fb->pixels = pixels;
+	fb->width = width;
+	fb->height = height;
 	out->width = width;
 	out->height = height;
-	out->center = (Vec2) {
-		.x = ((float)width)*0.5f,
-		.y = ((float)height)*0.5f
-	};
-	out->focal = focal;
-	out->background = background;
-	memset(pixels, background, width*height);
+	out->camera = cam;
+	cam->position = (Vec3) {0,0,0};
+	cam->forward = (Vec3) {0,0,1};
+	cam->up = (Vec3) {0,1,0};
+	cam->focal = focal;
 	for (int i=0; i < width*height; i++) {
-		out->z_buffer[i] = INFINITY;
+		fb->z_buffer[i] = INFINITY;
 	}
 	return 0;
 }
 
-int clear_view(View *v) {
-	memset(v->pixels, v->background, v->width*v->height);
-	for (int i=0; i < v->width*v->height; i++) {
-		v->z_buffer[i] = INFINITY;
+void free_camera(Camera *cam) {
+	cam->focal = 0;
+	cam->position = (Vec3) {0,0,0};
+	cam->forward = (Vec3) {0,0,0};
+	cam->up = (Vec3) {0,0,0};
+}
+
+void free_fb(FrameBuffer *fb) {
+	fb->width = 0;
+	fb->height = 0;
+	free(fb->z_buffer);
+	free(fb->pixels);
+	fb->z_buffer = NULL;
+	fb->pixels = NULL;
+}
+
+int clear_pixels(FrameBuffer *fb) {
+	memset(fb->pixels, ' ', fb->width*fb->height);
+	return 0;
+}
+
+int clear_fb(FrameBuffer *fb) {
+	for (int i=0; i < fb->width*fb->height; i++) {
+		fb->z_buffer[i] = INFINITY;
 	}
 	return 0;
 }
 
-void free_view(View *v) {
-	free(v->pixels);
-	free(v->z_buffer);
-	v->pixels = NULL;
-	v->z_buffer = NULL;
+void free_view(Scene *v) {
 	v->width = 0;
 	v->height = 0;
-	v->center = (Vec2) {0,0};
-	v->focal = 0;
-	v->background = ' ';
+	free_camera(v->camera);
+	v->camera = NULL;
 }
-
 
 //bottom left point
 int cube(Vec3 center, float l, Mesh *out) {
@@ -175,7 +234,7 @@ int cube(Vec3 center, float l, Mesh *out) {
 	out->triangles[0] = (Triangle) {0,4,1};
 	out->triangles[1] = (Triangle) {1,4,5};
 	out->triangles[2] = (Triangle) {1,5,2};
-	out->triangles[3] = (Triangle) {2,5,1};
+	out->triangles[3] = (Triangle) {2,5,6};
 	out->triangles[4] = (Triangle) {3,2,6};
 	out->triangles[5] = (Triangle) {3,6,7};
 	out->triangles[6] = (Triangle) {3,7,0};
@@ -225,10 +284,24 @@ int rotate_Y(const Mesh *m, float theta, Vec3 center, Mesh *rotated) {
 	return 0;
 }
 
+int rotate_X(const Mesh *m, float theta, Vec3 center, Mesh *rotated) {
+	for (int i=0; i < m->num_vertices; i++) {
+		//x' = x
+		//y' = y cos(theta) - z sin(theta)
+		//z' = x sin(theta) + z cos(theta)
+		Vec3 p = m->vertices[i];
+		rotated ->vertices[i] = (Vec3) {
+			.x = p.x,
+			.y = (p.y - center.y)*cosf(theta) - (p.z - center.z)*sinf(theta) + center.y,
+			.z = (p.x - center.x)*sinf(theta) + (p.z - center.z)*cosf(theta) + center.z
+		};
+	}
+	return 0;
+}
 
-int p_to_index(View *v, int x, int y) {
-	int w = v-> width;
-	int h = v-> height;
+int p_to_index(FrameBuffer *fb, int x, int y) {
+	int w = fb-> width;
+	int h = fb-> height;
 
 	if (x < 0 || y < 0 || x >= w || y >= h) {
 		return -1;
@@ -237,80 +310,92 @@ int p_to_index(View *v, int x, int y) {
 	return y * w + x;
 }
 
-Vec2 p3_to_p2(Vec3 p, float f, Vec2 c) {
+Vec2 project_point(Vec3 p, float f, Vec2 c) {
 	return (Vec2) {
 		.x = c.x + (f*p.x/p.z)*X_CORRECTION,
 		.y = c.y - (f*p.y/p.z)
 	};
 }
 
-int draw_pixel(View *v, Vec2 p, float z, int brightness) {
-	int i = p_to_index(v, p.x, p.y);
+int draw_pixel(FrameBuffer *fb, Vec2 p, float z, int brightness) {
+	int i = p_to_index(fb, p.x, p.y);
 	if (i < 0) {
 		return -1;
 	}
-	if (z < v->z_buffer[i]) {
-		v->pixels[i] = ASCII_RAMP[brightness * (ASCII_RAMP_SIZE-1) / 255];
-		v->z_buffer[i] = z;
+	if (z < fb->z_buffer[i]) {
+		fb->pixels[i] = ASCII_RAMP[brightness * (ASCII_RAMP_SIZE-1) / 255];
+		fb->z_buffer[i] = z;
 	}
 	return 0;
 }
 
-int draw_point(View *v, Vec3 p, int brightness) {
-	brightness = brightness > 255? 255 : brightness;
-	Vec2 pp = p3_to_p2(p, v->focal, v->center);
-		
-	draw_pixel(v, pp, p.z, brightness);
-	return 0;
-}
-
-int draw_line(View *v, Vec3 a, Vec3 b, int brightness) {
-	brightness = brightness > 255? 255 : brightness;
-	float dx = b.x - a.x;
-	float dy = b.y - a.y;
-	float dz = b.z - a.z;
-	
-	int step = fmaxf(fabsf(dx), fmaxf(fabsf(dy), fabsf(dz)));
-
-	float step_x = dx / (float) step;
-	float step_y = dy / (float) step;
-	float step_z = dz / (float) step;
-	
-	float x = 0;
-	float y = 0;
-	float z = 0;
-	
-	for (int i=0; i < step; i++) {
-		x += step_x;
-		y += step_y;
-		z += step_z;
-		draw_point(v, (Vec3){a.x+x,a.y+y,a.z+z}, brightness);
+int inside_triangle(Vec2 a, Vec2 b, Vec2 c, Vec2 p) {
+	if ((p.x-a.x)*(p.y-b.y) < (p.y-a.y)*(p.x-b.x)) {
+		return 0;
 	}
-	return 0;
+	if ((p.x-b.x)*(p.y-c.y) < (p.y-b.y)*(p.x-c.x)) {
+		return 0;
+	}
+	if ((p.x-c.x)*(p.y-a.y) < (p.y-c.y)*(p.x-a.x)) {
+		return 0;
+	}
+	return 1;
 }
 
-void draw(View *view, Mesh *m) {
-	clear_view(view);
+void draw_surface(FrameBuffer *fb, Camera *cam, Vec3 a, Vec3 b, Vec3 c) {
+	//Centroid of surface
+	Vec3 centroid = mult(add(a, add(b, c)), 0.33f);
+	//Camera vector
+	Vec3 cam_vector = sub(centroid, cam->position);
+	//Surface normal vector
+	Vec3 n = cross(sub(b,a), sub(c,a));
+	float s = dot(cam_vector, n);
+	//back-culling
+	if (s>0) {
+		return;
+	}
+	//Fb center
+	Vec2 sc = {(float)fb->width/2, (float)fb->height/2};
+	Vec2 aa = project_point(a, cam->focal, sc);
+	Vec2 bb = project_point(b, cam->focal, sc);
+	Vec2 cc = project_point(c, cam->focal, sc);
+	//Bounding box
+	int min_x, min_y, max_x, max_y;
+	min_x = fmin(aa.x, fmin(bb.x, cc.x));
+	min_y = fmin(aa.y, fmin(bb.y, cc.y));
+	max_x = fmax(aa.x, fmax(bb.x, cc.x));
+	max_y = fmax(aa.y, fmax(bb.y, cc.y));
+	for (float y=min_y; y < max_y; y += 1.) {
+		for (float x=min_x; x < max_x; x += 1.) {
+			Vec2 p = {x,y};
+			if (inside_triangle(aa,bb,cc,p)>0) {
+				draw_pixel(fb, p, c.z, 255);
+			}
+		}
+	}
+}
+
+void draw(FrameBuffer *fb, Camera *cam, Mesh *m) {
+	clear_pixels(fb);
+	clear_fb(fb);
 	for(int i=0; i < m->num_triangles; i++) {
-		int a = m->triangles[i].a;
-		int b = m->triangles[i].b;
-		int c = m->triangles[i].c;
-		draw_line(view, m->vertices[a], m->vertices[b], 255);
-		draw_line(view, m->vertices[b], m->vertices[c], 255);
-		draw_line(view, m->vertices[c], m->vertices[a], 255);
+		Vec3 a = m->vertices[m->triangles[i].a];
+		Vec3 b = m->vertices[m->triangles[i].b];
+		Vec3 c = m->vertices[m->triangles[i].c];
+		draw_surface(fb, cam, a, b, c);
 	}
 }
 
-void print(View *view) {
+void print(FrameBuffer *fb) {
 	printf(CU);
 
-	int w = view -> width;
-	int h = view -> height;
+	int w = fb -> width;
+	int h = fb -> height;
 
 	for(int i=0; i < h; i++) {
 		char row[w+1];
 		for(int j=0; j < w; j++) {
-			row[j] = view->pixels[i*w+j];
+			row[j] = fb->pixels[i*w+j];
 		}
 		row[w] = '\0';
 		printf("%s\n", row);
@@ -319,8 +404,8 @@ void print(View *view) {
 
 /*
  * NEXT STEPS:
- * 1. Triangle data structure
- * 2. Back-face culling
+ * 1. Triangle data structure ✅
+ * 2. Back-face culling 
  * 3. Filled triangle rasterization
  * 4. Depth interpolation
  * 5. Face normals
@@ -336,9 +421,11 @@ int main() {
 	int rc = 0;
 	Mesh m = {0};
 	Mesh rotated = {0};
-	View v = {0};
+	Scene v = {0};
+	FrameBuffer fb = {0};
+	Camera cam = {0};
 
-	if (init_view(WIDTH, HEIGHT, FL, ASCII_RAMP[0], &v) != 0) {
+	if (init_scene(WIDTH, HEIGHT, FL, &v, &fb, &cam) != 0) {
 		fprintf(stderr, "ERROR: Could not allocate view\n");
 		rc = 8;
 		goto cleanup;
@@ -357,12 +444,13 @@ int main() {
 
 	float theta = 0;
 	while(1) {
-		theta += 0.5*2*M_PI/60;
+		theta += 0.3*2*M_PI/60;
 		rotate_Y(&m, theta, (Vec3){0,0,200}, &rotated);
-		draw(&v, &rotated);
-		print(&v);
+		rotate_X(&rotated, 0.6*theta, (Vec3){0,0,200},&rotated);
+		draw(&fb, &cam, &rotated);
+		print(&fb);
 		usleep(16 * 1000);
-	}
+}
 
 	//cleanup
 	cleanup:
@@ -370,6 +458,5 @@ int main() {
 	free_model(&rotated);
 	free_view(&v);
 	return rc;
-
 }
 
