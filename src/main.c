@@ -293,7 +293,7 @@ int rotate_X(const Mesh *m, float theta, Vec3 center, Mesh *rotated) {
 		rotated ->vertices[i] = (Vec3) {
 			.x = p.x,
 			.y = (p.y - center.y)*cosf(theta) - (p.z - center.z)*sinf(theta) + center.y,
-			.z = (p.x - center.x)*sinf(theta) + (p.z - center.z)*cosf(theta) + center.z
+			.z = (p.y - center.y)*sinf(theta) + (p.z - center.z)*cosf(theta) + center.z
 		};
 	}
 	return 0;
@@ -369,7 +369,7 @@ void draw_surface(FrameBuffer *fb, Camera *cam, Vec3 a, Vec3 b, Vec3 c) {
 		for (float x=min_x; x < max_x; x += 1.) {
 			Vec2 p = {x,y};
 			if (inside_triangle(aa,bb,cc,p)>0) {
-				draw_pixel(fb, p, c.z, 255);
+				draw_pixel(fb, p, centroid.z, 255);
 			}
 		}
 	}
