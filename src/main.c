@@ -70,25 +70,32 @@ Vec3 normalize(Vec3 v) {
 }
 
 typedef struct {
-	int a;
-	int b;
-	int c;
+	int a, b, c;
 } Triangle;
+
+typedef struct {
+	Vec3 a, b, c;
+	Vec3 n_a, n_b, n_c;
+} Surface;
 
 typedef struct {
 	Vec3 *vertices;
 	Triangle *triangles;
+	Vec3 *normals;
 	int num_vertices;
 	int num_triangles;
 } Mesh;
 
 int init_mesh(Mesh *m, int num_vertices, int num_triangles) {
 	m->vertices = num_vertices ? malloc(num_vertices * sizeof(*m->vertices)) : NULL;
+	m->normals = num_vertices ? malloc(num_vertices * sizeof(*m->normals)) : NULL;
 	m->triangles  = num_triangles  ? malloc(num_triangles  * sizeof(*m->triangles))  : NULL;
 
 	if ((num_vertices && !m->vertices) ||
+		(num_vertices && !m->normals) ||
 		(num_triangles  && !m->triangles)) {
 		free(m->vertices);
+		free(m->normals);
 		free(m->triangles);
 		*m = (Mesh){0};
 		return -1;
@@ -99,6 +106,32 @@ int init_mesh(Mesh *m, int num_vertices, int num_triangles) {
 	return 0;
 }
 
+void calculate_vertices_normals(Mesh *m) {
+	// fill default values
+	for (int i=0; i < m->num_vertices; i++) {
+		m->normals[i] = (Vec3) {0, 0, 0};
+	}
+
+	for (int i=0; i < m->num_triangles; i++) {
+		Triangle t = m->triangles[i];
+
+		Vec3 a = m->vertices[t.a];
+		Vec3 b = m->vertices[t.b];
+		Vec3 c = m->vertices[t.c];
+
+		Vec3 n = normalize(cross(sub(b,a), sub(c,a)));
+
+		m->normals[t.a] = add(m->normals[t.a], n);
+		m->normals[t.b] = add(m->normals[t.b], n);
+		m->normals[t.c] = add(m->normals[t.c], n);
+	}
+
+	//normalize
+	for (int i=0; i < m->num_vertices; i++) {
+		m->normals[i] = normalize(m->normals[i]);
+	}
+}
+
 int copy_model(Mesh *dest, const Mesh *src) {
 	if ((dest->num_vertices != src->num_vertices)
 		|| (dest->num_triangles != src->num_triangles)) {
@@ -106,10 +139,11 @@ int copy_model(Mesh *dest, const Mesh *src) {
 		return -1;
 	}
 	if (src->num_vertices) {
-		memcpy(dest->vertices, src->vertices, src->num_vertices*sizeof(Vec3));
+		memcpy(dest->vertices, src->vertices, src->num_vertices*sizeof(*src->vertices));
+		memcpy(dest->normals, src->normals, src->num_vertices*sizeof(*src->normals));
 	}
 	if (src->num_triangles) {
-		memcpy(dest->triangles, src->triangles, src->num_triangles*sizeof(Triangle));
+		memcpy(dest->triangles, src->triangles, src->num_triangles*sizeof(*src->triangles));
 	}
 	dest->num_vertices = src->num_vertices;
 	dest->num_triangles = src->num_triangles;
@@ -204,12 +238,8 @@ void free_fb(FrameBuffer *fb) {
 	fb->pixels = NULL;
 }
 
-int clear_pixels(FrameBuffer *fb) {
+int clear_frame(FrameBuffer *fb) {
 	memset(fb->pixels, ' ', fb->width*fb->height);
-	return 0;
-}
-
-int clear_fb(FrameBuffer *fb) {
 	for (int i=0; i < fb->width*fb->height; i++) {
 		fb->z_buffer[i] = INFINITY;
 	}
@@ -245,15 +275,6 @@ int cube(Vec3 center, float l, Mesh *out) {
 	out->vertices[6] = (Vec3) {x-h,y-h,z-h};
 	out->vertices[7] = (Vec3) {x-h,y-h,z+h};
 	
-/*
- *       2-----1
- *      /|    /|
- *     3-+---0 |
- *     | 6---+-5
- *     |/    |/
- *     7-----4
- * */
-
 	out->triangles[0] = (Triangle) {0,4,1};
 	out->triangles[1] = (Triangle) {1,4,5};
 	out->triangles[2] = (Triangle) {1,5,2};
@@ -267,28 +288,7 @@ int cube(Vec3 center, float l, Mesh *out) {
 	out->triangles[10] = (Triangle) {4,7,6};
 	out->triangles[11] = (Triangle) {4,6,5};
 
-	return 0;
-}
-
-//center + radius + density (how many vertices per 360°)
-int sphere(Vec3 center, float radius, int density, Mesh *out) {
-	float x = center.x;
-	float y = center.y;
-	float z = center.z;
-	float step = 2*M_PI / (float)density;
-	int counter = 0;
-	float alpha, beta;
-	for (int i = 0; i < density; i++) {
-		alpha = (float)i*(step);
-		for (int j = 0; j < density; j++) {
-			beta = (float)j*(step);
-			out->vertices[counter++] = (Vec3) {
-				.x = x+radius*sinf(alpha)*cosf(beta), 
-				.y = y+radius*sinf(alpha)*sinf(beta), 
-				.z = z+radius*cosf(alpha)
-			};
-		}
-	}
+	calculate_vertices_normals(out);
 	return 0;
 }
 
@@ -356,19 +356,17 @@ float edge_function(Vec2 a, Vec2 b, Vec2 c) {
 	return  (c.x-a.x)*(c.y-b.y) - (c.y-a.y)*(c.x - b.x);
 }
 
-void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Vec3 a, Vec3 b, Vec3 c) {
+void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Surface s) {
 	//Centroid of surface
-	Vec3 centroid = mult(add(a, add(b, c)), 0.33f);
+	Vec3 centroid = mult(add(s.a, add(s.b, s.c)), 0.33f);
 	//Camera vector
 	Vec3 cam_vector = sub(centroid, cam->position);
 	Vec3 light_vector = normalize(mult(light->direction, -1.));
 	//Surface normal vectors
-	Vec3 norm_a = normalize(cross(sub(b,a), sub(c,a)));
+	Vec3 norm_a = normalize(cross(sub(s.b,s.a), sub(s.c,s.a)));
 
 	//keep back-culling based on the  A-vertice
-	float s = dot(cam_vector, norm_a);
-	//back-culling
-	if (s>0) {
+	if (dot(cam_vector, norm_a)>0) {
 		return;
 	}
 
@@ -376,9 +374,9 @@ void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Vec3 a, Vec3 b, Ve
 	Vec2 sc = {(float)fb->width/2, (float)fb->height/2};
 
 	//Project
-	Vec2 aa = project_point(a, cam->focal, sc);
-	Vec2 bb = project_point(b, cam->focal, sc);
-	Vec2 cc = project_point(c, cam->focal, sc);
+	Vec2 aa = project_point(s.a, cam->focal, sc);
+	Vec2 bb = project_point(s.b, cam->focal, sc);
+	Vec2 cc = project_point(s.c, cam->focal, sc);
 
 	//Bounding box
 	int min_x, min_y, max_x, max_y;
@@ -388,18 +386,20 @@ void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Vec3 a, Vec3 b, Ve
 	max_y = fmax(aa.y, fmax(bb.y, cc.y));
 	for (float y=min_y; y < max_y; y += 1.) {
 		for (float x=min_x; x < max_x; x += 1.) {
-			Vec2 p = {x,y};
+			Vec2 p = {x+0.5,y+0.5};
 			float area = edge_function(aa, bb, cc);
 			float w0 = edge_function(aa, bb, p)/area;
 			float w1 = edge_function(bb, cc, p)/area;
 			float w2 = edge_function(cc, aa, p)/area;
+			//Interpolate normal vector
+			Vec3 norm = normalize(add(mult(s.n_a, w1),
+			     add(mult(s.n_b, w2), mult(s.n_c, w0))));
 			//Diffuse
-			float brightness = 0.15 + 0.85*fmax(0., dot(light_vector, norm_a));
+			float brightness = 0.15 + 0.85*fmax(0., dot(light_vector, norm));
 			//interpolate z
-			float z = w0*a.z+w1*b.z+w2*c.z;
-			//interpolate normal vector
-			if ((w0 > 0 && w1 > 0 && w2 > 0) || 
-				(w0 < 0 && w1 < 0 && w2 < 0)) {
+			float z = w0*s.a.z+w1*s.b.z+w2*s.c.z;
+			if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || 
+				(w0 <= 0 && w1 <= 0 && w2 <= 0)) {
 				draw_pixel(fb, p, z, brightness);
 			}
 		}
@@ -407,13 +407,19 @@ void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Vec3 a, Vec3 b, Ve
 }
 
 void draw(FrameBuffer *fb, Camera *cam, Light *light, Mesh *m) {
-	clear_pixels(fb);
-	clear_fb(fb);
+	clear_frame(fb);
+	calculate_vertices_normals(m);
 	for(int i=0; i < m->num_triangles; i++) {
-		Vec3 a = m->vertices[m->triangles[i].a];
-		Vec3 b = m->vertices[m->triangles[i].b];
-		Vec3 c = m->vertices[m->triangles[i].c];
-		draw_surface(fb, cam, light, a, b, c);
+		Triangle t = m->triangles[i];
+		Surface s = {
+			m->vertices[t.a],
+			m->vertices[t.b],
+			m->vertices[t.c],
+			m->normals[t.a],
+			m->normals[t.b],
+			m->normals[t.c]
+		};
+		draw_surface(fb, cam, light, s);
 	}
 }
 
@@ -482,7 +488,7 @@ int main() {
 		draw(&fb, &cam, &light, &rotated);
 		print(&fb);
 		usleep(16 * 1000);
-}
+	}
 
 	//cleanup
 	cleanup:
