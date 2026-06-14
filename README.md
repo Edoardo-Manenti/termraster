@@ -1,5 +1,7 @@
 # TermRaster
 
+![Demo](assets/demo.gif)
+
 A software 3D renderer written from scratch in C that renders directly to the terminal using ASCII characters.
 
 No OpenGL. No SDL. No graphics libraries.
@@ -28,10 +30,15 @@ No OpenGL. No SDL. No graphics libraries.
 
 Build a miniature software graphics pipeline from first principles and understand how modern renderers work under the hood.
 
-## Build & Run
+## Build
 
 ```bash
-gcc main.c -lm -O2 -o termraster
-./termraster
+make
+```
+
+## Run
+
+```bash
+make run
 ```
 

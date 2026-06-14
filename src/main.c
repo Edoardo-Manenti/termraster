@@ -441,15 +441,16 @@ void print(FrameBuffer *fb) {
 
 /*
  * NEXT STEPS:
- * 1. Triangle data structure ✅
- * 2. Back-face culling ✅
- * 3. Filled triangle rasterization ✅
- * 4. Depth interpolation ✅
- * 5. Face normals ✅
- * 6. Flat shading ✅
- * 7. Camera movement 
- * 8. OBJ mesh loading
- * 9. Gouraud/Phong shading
+ * Rasterization ✓
+ * Phong normals ✓
+ * Object/Transform abstraction
+ * Matrix math
+ * Renderer abstraction
+ * OBJ loading
+ * Modularization
+ * Camera movement
+ * Textures
+ * Perspective-correct interpolation
  * */
 
 int main() {
