@@ -1,6 +1,6 @@
 # TermRaster
 
-![Demo](assets/demo.gif)
+![Demo](assets/demo.gif | width=200)
 
 A software 3D renderer written from scratch in C that renders directly to the terminal using ASCII characters.
 
