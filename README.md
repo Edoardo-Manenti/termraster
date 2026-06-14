@@ -1,7 +1,7 @@
 # TermRaster
 
 <p align="center">
-  <img src="assets/demo.gif" width="300">
+  <img src="assets/demo.gif" width="500">
 </p>
 
 A software 3D renderer written from scratch in C that renders directly to the terminal using ASCII characters.
