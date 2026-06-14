@@ -48,6 +48,7 @@ Vec3 sub(Vec3 a, Vec3 b) {
 	return add(a, mult(b, -1.));
 }
 
+
 Vec3 cross(Vec3 a, Vec3 b) {
 	return (Vec3) {
 		a.y*b.z-b.y*a.z,
@@ -58,6 +59,14 @@ Vec3 cross(Vec3 a, Vec3 b) {
 
 float dot(Vec3 a, Vec3 b) {
 	return a.x*b.x+a.y*b.y+a.z*b.z;
+}
+
+Vec3 normalize(Vec3 v) {
+	float mod = sqrtf(dot(v, v));
+	if (mod < EPSILON) {
+		return (Vec3){0};
+	}
+	return mult(v, 1/mod);
 }
 
 typedef struct {
@@ -117,6 +126,11 @@ void free_model(Mesh *m) {
 }
 
 typedef struct {
+	Vec3 direction;
+	float brightness;
+} Light;
+
+typedef struct {
 	Vec3 position;
 	Vec3 forward;
 	Vec3 up;
@@ -127,6 +141,7 @@ typedef struct {
 	int width;
 	int height;
 	Camera *camera;
+	Light *light;
 } Scene;
 
 
@@ -137,7 +152,7 @@ typedef struct {
 	float *z_buffer;
 } FrameBuffer;
 
-int init_scene(int width, int height, float focal, Scene *out, FrameBuffer *fb, Camera *cam) {
+int init_scene(int width, int height, float focal, Scene *out, FrameBuffer *fb, Camera *cam, Light *light) {
 	char* pixels = malloc(width*height*sizeof(char));
 	if (pixels == NULL) {
 		return -1;
@@ -155,6 +170,9 @@ int init_scene(int width, int height, float focal, Scene *out, FrameBuffer *fb, 
 	out->width = width;
 	out->height = height;
 	out->camera = cam;
+	out->light = light;
+	light->direction = (Vec3) {-1, -1, 1};
+	light->brightness = 0.f;
 	cam->position = (Vec3) {0,0,0};
 	cam->forward = (Vec3) {0,0,1};
 	cam->up = (Vec3) {0,1,0};
@@ -165,11 +183,16 @@ int init_scene(int width, int height, float focal, Scene *out, FrameBuffer *fb, 
 	return 0;
 }
 
+void free_light(Light *l) {
+	l->direction = (Vec3) {0};
+	l->brightness = 0;
+}
+
 void free_camera(Camera *cam) {
 	cam->focal = 0;
-	cam->position = (Vec3) {0,0,0};
-	cam->forward = (Vec3) {0,0,0};
-	cam->up = (Vec3) {0,0,0};
+	cam->position = (Vec3) {0};
+	cam->forward = (Vec3) {0};
+	cam->up = (Vec3) {0};
 }
 
 void free_fb(FrameBuffer *fb) {
@@ -317,48 +340,46 @@ Vec2 project_point(Vec3 p, float f, Vec2 c) {
 	};
 }
 
-int draw_pixel(FrameBuffer *fb, Vec2 p, float z, int brightness) {
+int draw_pixel(FrameBuffer *fb, Vec2 p, float z, float brightness) {
 	int i = p_to_index(fb, p.x, p.y);
 	if (i < 0) {
 		return -1;
 	}
 	if (z < fb->z_buffer[i]) {
-		fb->pixels[i] = ASCII_RAMP[brightness * (ASCII_RAMP_SIZE-1) / 255];
+		fb->pixels[i] = ASCII_RAMP[(int)(brightness*(ASCII_RAMP_SIZE-1))];
 		fb->z_buffer[i] = z;
 	}
 	return 0;
 }
 
-int inside_triangle(Vec2 a, Vec2 b, Vec2 c, Vec2 p) {
-	if ((p.x-a.x)*(p.y-b.y) < (p.y-a.y)*(p.x-b.x)) {
-		return 0;
-	}
-	if ((p.x-b.x)*(p.y-c.y) < (p.y-b.y)*(p.x-c.x)) {
-		return 0;
-	}
-	if ((p.x-c.x)*(p.y-a.y) < (p.y-c.y)*(p.x-a.x)) {
-		return 0;
-	}
-	return 1;
+float edge_function(Vec2 a, Vec2 b, Vec2 c) {
+	return  (c.x-a.x)*(c.y-b.y) - (c.y-a.y)*(c.x - b.x);
 }
 
-void draw_surface(FrameBuffer *fb, Camera *cam, Vec3 a, Vec3 b, Vec3 c) {
+void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Vec3 a, Vec3 b, Vec3 c) {
 	//Centroid of surface
 	Vec3 centroid = mult(add(a, add(b, c)), 0.33f);
 	//Camera vector
 	Vec3 cam_vector = sub(centroid, cam->position);
-	//Surface normal vector
-	Vec3 n = cross(sub(b,a), sub(c,a));
-	float s = dot(cam_vector, n);
+	Vec3 light_vector = normalize(mult(light->direction, -1.));
+	//Surface normal vectors
+	Vec3 norm_a = normalize(cross(sub(b,a), sub(c,a)));
+
+	//keep back-culling based on the  A-vertice
+	float s = dot(cam_vector, norm_a);
 	//back-culling
 	if (s>0) {
 		return;
 	}
+
 	//Fb center
 	Vec2 sc = {(float)fb->width/2, (float)fb->height/2};
+
+	//Project
 	Vec2 aa = project_point(a, cam->focal, sc);
 	Vec2 bb = project_point(b, cam->focal, sc);
 	Vec2 cc = project_point(c, cam->focal, sc);
+
 	//Bounding box
 	int min_x, min_y, max_x, max_y;
 	min_x = fmin(aa.x, fmin(bb.x, cc.x));
@@ -368,21 +389,31 @@ void draw_surface(FrameBuffer *fb, Camera *cam, Vec3 a, Vec3 b, Vec3 c) {
 	for (float y=min_y; y < max_y; y += 1.) {
 		for (float x=min_x; x < max_x; x += 1.) {
 			Vec2 p = {x,y};
-			if (inside_triangle(aa,bb,cc,p)>0) {
-				draw_pixel(fb, p, centroid.z, 255);
+			float area = edge_function(aa, bb, cc);
+			float w0 = edge_function(aa, bb, p)/area;
+			float w1 = edge_function(bb, cc, p)/area;
+			float w2 = edge_function(cc, aa, p)/area;
+			//Diffuse
+			float brightness = 0.15 + 0.85*fmax(0., dot(light_vector, norm_a));
+			//interpolate z
+			float z = w0*a.z+w1*b.z+w2*c.z;
+			//interpolate normal vector
+			if ((w0 > 0 && w1 > 0 && w2 > 0) || 
+				(w0 < 0 && w1 < 0 && w2 < 0)) {
+				draw_pixel(fb, p, z, brightness);
 			}
 		}
 	}
 }
 
-void draw(FrameBuffer *fb, Camera *cam, Mesh *m) {
+void draw(FrameBuffer *fb, Camera *cam, Light *light, Mesh *m) {
 	clear_pixels(fb);
 	clear_fb(fb);
 	for(int i=0; i < m->num_triangles; i++) {
 		Vec3 a = m->vertices[m->triangles[i].a];
 		Vec3 b = m->vertices[m->triangles[i].b];
 		Vec3 c = m->vertices[m->triangles[i].c];
-		draw_surface(fb, cam, a, b, c);
+		draw_surface(fb, cam, light, a, b, c);
 	}
 }
 
@@ -405,12 +436,12 @@ void print(FrameBuffer *fb) {
 /*
  * NEXT STEPS:
  * 1. Triangle data structure ✅
- * 2. Back-face culling 
- * 3. Filled triangle rasterization
- * 4. Depth interpolation
- * 5. Face normals
- * 6. Flat shading
- * 7. Camera movement
+ * 2. Back-face culling ✅
+ * 3. Filled triangle rasterization ✅
+ * 4. Depth interpolation ✅
+ * 5. Face normals ✅
+ * 6. Flat shading ✅
+ * 7. Camera movement 
  * 8. OBJ mesh loading
  * 9. Gouraud/Phong shading
  * */
@@ -424,8 +455,9 @@ int main() {
 	Scene v = {0};
 	FrameBuffer fb = {0};
 	Camera cam = {0};
+	Light light = {0};
 
-	if (init_scene(WIDTH, HEIGHT, FL, &v, &fb, &cam) != 0) {
+	if (init_scene(WIDTH, HEIGHT, FL, &v, &fb, &cam, &light) != 0) {
 		fprintf(stderr, "ERROR: Could not allocate view\n");
 		rc = 8;
 		goto cleanup;
@@ -435,7 +467,7 @@ int main() {
 		rc = 8;
 		goto cleanup;
 	};
-	cube((Vec3){0,0,200}, 20, &m);
+	cube((Vec3){0,0,200}, 15, &m);
 	if (copy_model(&rotated, &m) != 0) {
 		fprintf(stderr, "ERROR: Could not copy model");
 		rc = 8;
@@ -447,7 +479,7 @@ int main() {
 		theta += 0.3*2*M_PI/60;
 		rotate_Y(&m, theta, (Vec3){0,0,200}, &rotated);
 		rotate_X(&rotated, 0.6*theta, (Vec3){0,0,200},&rotated);
-		draw(&fb, &cam, &rotated);
+		draw(&fb, &cam, &light, &rotated);
 		print(&fb);
 		usleep(16 * 1000);
 }
