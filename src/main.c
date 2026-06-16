@@ -18,14 +18,11 @@
 #define ASCII_RAMP_SIZE 23
 
 typedef struct {
-	float x;
-	float y;
+	float x, y;
 } Vec2;
 
 typedef struct {
-	float x;
-	float y;
-	float z;
+	float x, y, z;
 } Vec3;
 
 Vec3 mult(Vec3 v, float c) {
@@ -67,6 +64,104 @@ Vec3 normalize(Vec3 v) {
 		return (Vec3){0};
 	}
 	return mult(v, 1/mod);
+}
+
+typedef struct {
+	float m[4][4];
+} Mat4;
+
+typedef struct {
+	float m[3][3];
+} Mat3;
+
+Mat3 mat3_identity(void) {
+	Mat3 m = {0};
+	m.m[0][0] = 1.f;
+	m.m[1][1] = 1.f;
+	m.m[2][2] = 1.f;
+	return m;
+}
+
+Mat3 mat3_transpose(Mat3 m) {
+	Mat3 n = {0};
+	for (size_t i=0; i<3; i++) {
+		for (size_t j=0; j<3; j++) {
+			n.m[i][j] = m.m[j][i];
+		}
+	}
+	return n;
+}
+
+float mat3_determinant(Mat3 m) {
+	return 
+	m.m[0][0] * (m.m[1][1]*m.m[2][2] - m.m[1][2]*m.m[2][1]) -
+	m.m[0][1] * (m.m[1][0]*m.m[2][2] - m.m[1][2]*m.m[2][0]) +
+	m.m[0][2] * (m.m[1][0]*m.m[2][1] - m.m[1][1]*m.m[2][0]);
+}
+
+Mat3 mat3_inverse(Mat3 m) {
+	float det = mat3_determinant(m);
+
+	if (det < EPSILON) {
+		return (Mat3) {0};
+	}
+
+	float inv_det = 1.f/det;
+
+	Mat3 r = {{
+		{
+		    (m.m[1][1]*m.m[2][2] - m.m[1][2]*m.m[2][1]) * inv_det,
+		    (m.m[0][2]*m.m[2][1] - m.m[0][1]*m.m[2][2]) * inv_det,
+		    (m.m[0][1]*m.m[1][2] - m.m[0][2]*m.m[1][1]) * inv_det
+		},
+		{
+		    (m.m[1][2]*m.m[2][0] - m.m[1][0]*m.m[2][2]) * inv_det,
+		    (m.m[0][0]*m.m[2][2] - m.m[0][2]*m.m[2][0]) * inv_det,
+		    (m.m[0][2]*m.m[1][0] - m.m[0][0]*m.m[1][2]) * inv_det
+		},
+		{
+		    (m.m[1][0]*m.m[2][1] - m.m[1][1]*m.m[2][0]) * inv_det,
+		    (m.m[0][1]*m.m[2][0] - m.m[0][0]*m.m[2][1]) * inv_det,
+		    (m.m[0][0]*m.m[1][1] - m.m[0][1]*m.m[1][0]) * inv_det
+		}
+	}};
+
+	return r;
+}
+
+Mat3 mat4_extract_mat3(Mat4 m) {
+	Mat3 n = {0};
+
+	for (size_t i=0; i<3; i++) {
+		for (size_t j=0; j<3; j++) {
+			n.m[i][j] = m.m[i][j];
+		}
+	}
+
+	return n;
+}
+
+Mat4 mat4_identity(void) {
+	Mat4 m = {0};
+	m.m[0][0] = 1.f;
+	m.m[1][1] = 1.f;
+	m.m[2][2] = 1.f;
+	m.m[3][3] = 1.f;
+	return m;
+}
+
+Mat4 mat4_mult(Mat4 a, Mat4 b) {
+	Mat4 m = {0};
+	for (int i=0; i<4 ; i++) {
+		for (int j=0; j<4; j++) {
+			float temp = 0.f;
+			for (int k=0; k<4; k++) {
+				temp += a.m[i][k]*b.m[k][j];
+			}
+			m.m[i][j] = temp;
+		}
+	}
+	return m;
 }
 
 typedef struct {
@@ -292,6 +387,55 @@ int cube(Vec3 center, float l, Mesh *out) {
 	return 0;
 }
 
+typedef struct {
+	Mesh *mesh;
+	Mat4 model;
+	Mat3 normal;
+} Object;
+
+Mat4 mat4_rotate_X(float theta) {
+	Mat4 m = mat4_identity();
+	m.m[1][1] = cosf(theta);
+	m.m[1][2] = -sinf(theta);
+	m.m[2][1] = sinf(theta);
+	m.m[2][2] = cosf(theta);
+	return m;
+}
+
+Mat4 mat4_rotate_Y(float theta) {
+	Mat4 m = mat4_identity();
+	m.m[0][0] = cosf(theta);
+	m.m[0][2] = -sinf(theta);
+	m.m[2][0] = sinf(theta);
+	m.m[2][2] = cosf(theta);
+	return m;
+}
+
+Mat4 mat4_rotate_Z(float theta) {
+	Mat4 m = mat4_identity();
+	m.m[0][0] = cosf(theta);
+	m.m[0][1] = -sinf(theta);
+	m.m[1][0] = sinf(theta);
+	m.m[1][1] = cosf(theta);
+	return m;
+}
+
+Mat4 mat4_scale(float scaleX, float scaleY, float scaleZ) {
+	Mat4 m = mat4_identity();
+	m.m[0][0] = scaleX;
+	m.m[1][1] = scaleY;
+	m.m[2][2] = scaleZ;
+	return m;
+}
+
+Vec3 mat4_mult_point(Mat4 m, Vec3 p) {
+	Vec3 out = {0};
+	out.x = m.m[0][0]*p.x+m.m[0][1]*p.y+m.m[0][2]*p.z+m.m[0][3];
+	out.y = m.m[1][0]*p.x+m.m[1][1]*p.y+m.m[1][2]*p.z+m.m[1][3];
+	out.z = m.m[2][0]*p.x+m.m[2][1]*p.y+m.m[2][2]*p.z+m.m[2][3];
+	return out;
+}
+
 int rotate_Y(const Mesh *m, float theta, Vec3 center, Mesh *rotated) {
 	for (int i=0; i < m->num_vertices; i++) {
 		//x' = x cos(theta) - z sin(theta)
@@ -333,15 +477,24 @@ int p_to_index(FrameBuffer *fb, int x, int y) {
 	return y * w + x;
 }
 
-Vec2 project_point(Vec3 p, float f, Vec2 c) {
+Mat4 mat4_project(Camera *cam) {
+	Mat4 p = {0};
+	p.m[0][0] = cam->focal;
+	p.m[1][1] = cam->focal;
+	p.m[3][2] = 1.f;
+	return p;
+}
+
+Vec2 project_point(Vec3 p, float f) {
 	return (Vec2) {
-		.x = c.x + (f*p.x/p.z)*X_CORRECTION,
-		.y = c.y - (f*p.y/p.z)
+		.x = (f*p.x/p.z),
+		.y = (f*p.y/p.z)
 	};
 }
 
 int draw_pixel(FrameBuffer *fb, Vec2 p, float z, float brightness) {
-	int i = p_to_index(fb, p.x, p.y);
+	Vec2 c = {fb->width/2., fb->height/2.};
+	int i = p_to_index(fb, c.x+p.x*X_CORRECTION, c.y-p.y);
 	if (i < 0) {
 		return -1;
 	}
@@ -374,9 +527,9 @@ void draw_surface(FrameBuffer *fb, Camera *cam, Light *light, Surface s) {
 	Vec2 sc = {(float)fb->width/2, (float)fb->height/2};
 
 	//Project
-	Vec2 aa = project_point(s.a, cam->focal, sc);
-	Vec2 bb = project_point(s.b, cam->focal, sc);
-	Vec2 cc = project_point(s.c, cam->focal, sc);
+	Vec2 aa = project_point(s.a, cam->focal);
+	Vec2 bb = project_point(s.b, cam->focal);
+	Vec2 cc = project_point(s.c, cam->focal);
 
 	//Bounding box
 	int min_x, min_y, max_x, max_y;
