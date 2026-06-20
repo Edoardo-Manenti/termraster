@@ -101,13 +101,10 @@ float mat3_determinant(Mat3 m) {
 
 Mat3 mat3_inverse(Mat3 m) {
 	float det = mat3_determinant(m);
-
 	if (det < EPSILON) {
 		return (Mat3) {0};
 	}
-
 	float inv_det = 1.f/det;
-
 	Mat3 r = {{
 		{
 		    (m.m[1][1]*m.m[2][2] - m.m[1][2]*m.m[2][1]) * inv_det,
@@ -125,9 +122,9 @@ Mat3 mat3_inverse(Mat3 m) {
 		    (m.m[0][0]*m.m[1][1] - m.m[0][1]*m.m[1][0]) * inv_det
 		}
 	}};
-
 	return r;
 }
+
 
 Mat3 mat4_extract_mat3(Mat4 m) {
 	Mat3 n = {0};
@@ -139,6 +136,20 @@ Mat3 mat4_extract_mat3(Mat4 m) {
 	}
 
 	return n;
+}
+
+Mat3 mat3_mult(Mat3 a, Mat3 b) {
+	Mat3 m = {0};
+	for (int i=0; i<3 ; i++) {
+		for (int j=0; j<3; j++) {
+			float temp = 0.f;
+			for (int k=0; k<3; k++) {
+				temp += a.m[i][k]*b.m[k][j];
+			}
+			m.m[i][j] = temp;
+		}
+	}
+	return m;
 }
 
 Mat4 mat4_identity(void) {
@@ -355,7 +366,6 @@ int cube(Vec3 center, float l, Mesh *out) {
 		out->num_triangles != 12) {
 		return -1;
 	}
-
 	float x = center.x;
 	float y = center.y;
 	float z = center.z;
