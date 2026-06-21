@@ -3,12 +3,12 @@ CFLAGS = -Wall -Wextra -O2
 LDFLAGS = -lm
 
 TARGET = term-raster
-SRC = src/main.c
+SRC = src/main.c src/vecmath.c
 
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
+	$(CC) $(CFLAGS) $^ -o $(TARGET) $(LDFLAGS)
 
 run: $(TARGET)
 	./$(TARGET)
