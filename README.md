@@ -8,29 +8,13 @@ A software 3D renderer written from scratch in C that renders directly to the te
 
 No OpenGL. No SDL. No graphics libraries.
 
-## Current Features
+## Features
 
 * Perspective projection
-* Dynamic mesh structures
-* Cube and sphere generation
-* Wireframe rendering
-* Z-buffer
+* Dynamic mesh structures with cube generation
+* Filled triangle rasterization with z-buffer
+* Back-face culling and smooth shading
 * Real-time terminal animation
-
-## Roadmap
-
-* Filled triangle rasterization
-* Back-face culling
-* Hidden surface removal
-* Flat and smooth shading
-* Perspective-correct interpolation
-* OBJ mesh loading
-* Camera controls
-* Arbitrary mesh rendering
-
-## Goal
-
-Build a miniature software graphics pipeline from first principles and understand how modern renderers work under the hood.
 
 ## Build
 

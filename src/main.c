@@ -1,206 +1,19 @@
-#include<stdlib.h>
-#include<stdio.h>
-#include<string.h>
-#include<math.h>
-#include<unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include "vecmath.h"
 
 #define WIDTH 120
 #define HEIGHT 40
 #define FL 200.
 #define X_CORRECTION 2.f
-#define EPSILON 0.0001f
 
-// Escape sequences
-#define ED "\033[2J" //clear screen
-#define CU "\033[H" //cursor to the top
+#define ED "\033[2J"
+#define CU "\033[H"
 
 #define ASCII_RAMP " .,:;irsXA253hMHGS#9B&@"
 #define ASCII_RAMP_SIZE 23
-
-typedef struct {
-	float x, y;
-} Vec2;
-
-typedef struct {
-	float x, y, z;
-} Vec3;
-
-typedef struct {
-	float x, y, z, w;
-} Vec4;
-
-Vec2 vec3_extract_vec2(Vec3 v) {
-	return (Vec2) {
-		v.x,
-		v.y
-	};
-}
-
-Vec3 vec3_mult(Vec3 v, float c) {
-	return (Vec3) {
-		v.x*c,
-		v.y*c,
-		v.z*c,
-	};
-}
-
-Vec3 vec3_add(Vec3 a, Vec3 b) {
-	return (Vec3) {
-		a.x + b.x,
-		a.y + b.y,
-		a.z + b.z
-	};
-}
-
-Vec3 vec3_sub(Vec3 a, Vec3 b) {
-	return vec3_add(a, vec3_mult(b, -1.));
-}
-
-
-Vec3 vec3_cross(Vec3 a, Vec3 b) {
-	return (Vec3) {
-		a.y*b.z-b.y*a.z,
-		a.z*b.x-b.z*a.x,
-		a.x*b.y-b.x*a.y
-	};
-}
-
-float vec3_dot(Vec3 a, Vec3 b) {
-	return a.x*b.x+a.y*b.y+a.z*b.z;
-}
-
-Vec3 vec3_normalize(Vec3 v) {
-	float mod = sqrtf(vec3_dot(v, v));
-	if (mod < EPSILON) {
-		return (Vec3){0};
-	}
-	return vec3_mult(v, 1/mod);
-}
-
-Vec3 vec4_extract_vec3(Vec4 v) {
-	return (Vec3) {
-		v.x,
-		v.y,
-		v.z,
-	};
-}
-
-typedef struct {
-	float m[4][4];
-} Mat4;
-
-typedef struct {
-	float m[3][3];
-} Mat3;
-
-Mat3 mat3_identity(void) {
-	Mat3 m = {0};
-	m.m[0][0] = 1.f;
-	m.m[1][1] = 1.f;
-	m.m[2][2] = 1.f;
-	return m;
-}
-
-Mat3 mat3_transpose(Mat3 m) {
-	Mat3 n = {0};
-	for (size_t i=0; i<3; i++) {
-		for (size_t j=0; j<3; j++) {
-			n.m[i][j] = m.m[j][i];
-		}
-	}
-	return n;
-}
-
-float mat3_determinant(Mat3 m) {
-	return 
-	m.m[0][0] * (m.m[1][1]*m.m[2][2] - m.m[1][2]*m.m[2][1]) -
-	m.m[0][1] * (m.m[1][0]*m.m[2][2] - m.m[1][2]*m.m[2][0]) +
-	m.m[0][2] * (m.m[1][0]*m.m[2][1] - m.m[1][1]*m.m[2][0]);
-}
-
-Mat3 mat3_inverse(Mat3 m) {
-	float det = mat3_determinant(m);
-	if (fabsf(det) < EPSILON) {
-		return (Mat3) {0};
-	}
-	float inv_det = 1.f/det;
-	Mat3 r = {{
-		{
-		    (m.m[1][1]*m.m[2][2] - m.m[1][2]*m.m[2][1]) * inv_det,
-		    (m.m[0][2]*m.m[2][1] - m.m[0][1]*m.m[2][2]) * inv_det,
-		    (m.m[0][1]*m.m[1][2] - m.m[0][2]*m.m[1][1]) * inv_det
-		},
-		{
-		    (m.m[1][2]*m.m[2][0] - m.m[1][0]*m.m[2][2]) * inv_det,
-		    (m.m[0][0]*m.m[2][2] - m.m[0][2]*m.m[2][0]) * inv_det,
-		    (m.m[0][2]*m.m[1][0] - m.m[0][0]*m.m[1][2]) * inv_det
-		},
-		{
-		    (m.m[1][0]*m.m[2][1] - m.m[1][1]*m.m[2][0]) * inv_det,
-		    (m.m[0][1]*m.m[2][0] - m.m[0][0]*m.m[2][1]) * inv_det,
-		    (m.m[0][0]*m.m[1][1] - m.m[0][1]*m.m[1][0]) * inv_det
-		}
-	}};
-	return r;
-}
-
-
-Mat3 mat4_extract_mat3(Mat4 m) {
-	Mat3 n = {0};
-
-	for (size_t i=0; i<3; i++) {
-		for (size_t j=0; j<3; j++) {
-			n.m[i][j] = m.m[i][j];
-		}
-	}
-
-	return n;
-}
-
-Mat3 mat3_mult(Mat3 a, Mat3 b) {
-	Mat3 m = {0};
-	for (int i=0; i<3 ; i++) {
-		for (int j=0; j<3; j++) {
-			float temp = 0.f;
-			for (int k=0; k<3; k++) {
-				temp += a.m[i][k]*b.m[k][j];
-			}
-			m.m[i][j] = temp;
-		}
-	}
-	return m;
-}
-
-Vec3 mat3_mult_dir(Mat3 m, Vec3 p) {
-	Vec3 out = {0};
-	out.x = m.m[0][0]*p.x+m.m[0][1]*p.y+m.m[0][2]*p.z;
-	out.y = m.m[1][0]*p.x+m.m[1][1]*p.y+m.m[1][2]*p.z;
-	out.z = m.m[2][0]*p.x+m.m[2][1]*p.y+m.m[2][2]*p.z;
-	return out;
-}
-
-Mat4 mat4_identity(void) {
-	Mat4 m = {0};
-	m.m[0][0] = 1.f;
-	m.m[1][1] = 1.f;
-	m.m[2][2] = 1.f;
-	m.m[3][3] = 1.f;
-	return m;
-}
-
-Mat4 mat4_mult(Mat4 a, Mat4 b) {
-	Mat4 m = {0};
-	for (int i=0; i<4 ; i++) {
-		for (int j=0; j<4; j++) {
-			float temp = 0.f;
-			for (int k=0; k<4; k++) {
-				temp += a.m[i][k]*b.m[k][j];
-			}
-			m.m[i][j] = temp;
-		}
-	}
-	return m;
-}
 
 typedef struct {
 	int a, b, c;
@@ -271,24 +84,6 @@ void calculate_vertices_normals(Mesh *m) {
 	}
 }
 
-int copy_model(Mesh *dest, const Mesh *src) {
-	if ((dest->num_vertices != src->num_vertices)
-		|| (dest->num_triangles != src->num_triangles)) {
-		fprintf(stderr, "ERROR: src model and dest model sizes do not match");
-		return -1;
-	}
-	if (src->num_vertices) {
-		memcpy(dest->vertices, src->vertices, src->num_vertices*sizeof(*src->vertices));
-		memcpy(dest->normals, src->normals, src->num_vertices*sizeof(*src->normals));
-	}
-	if (src->num_triangles) {
-		memcpy(dest->triangles, src->triangles, src->num_triangles*sizeof(*src->triangles));
-	}
-	dest->num_vertices = src->num_vertices;
-	dest->num_triangles = src->num_triangles;
-	return 0;
-}
-
 void free_model(Mesh *m) {
 	free(m->vertices);
 	free(m->triangles);
@@ -356,25 +151,11 @@ int init_scene(int width, int height, float focal, Scene *out, FrameBuffer *fb, 
 	return 0;
 }
 
-void free_light(Light *l) {
-	l->direction = (Vec3) {0};
-	l->brightness = 0;
-}
-
 void free_camera(Camera *cam) {
 	cam->focal = 0;
 	cam->position = (Vec3) {0};
 	cam->forward = (Vec3) {0};
 	cam->up = (Vec3) {0};
-}
-
-void free_fb(FrameBuffer *fb) {
-	fb->width = 0;
-	fb->height = 0;
-	free(fb->z_buffer);
-	free(fb->pixels);
-	fb->z_buffer = NULL;
-	fb->pixels = NULL;
 }
 
 int clear_frame(FrameBuffer *fb) {
@@ -425,66 +206,6 @@ int cube_mesh(Mesh *out) {
 
 	calculate_vertices_normals(out);
 	return 0;
-}
-
-Mat4 mat4_rotate_X(float theta) {
-	Mat4 m = mat4_identity();
-	m.m[1][1] = cosf(theta);
-	m.m[1][2] = -sinf(theta);
-	m.m[2][1] = sinf(theta);
-	m.m[2][2] = cosf(theta);
-	return m;
-}
-
-Mat4 mat4_rotate_Y(float theta) {
-	Mat4 m = mat4_identity();
-	m.m[0][0] = cosf(theta);
-	m.m[0][2] = -sinf(theta);
-	m.m[2][0] = sinf(theta);
-	m.m[2][2] = cosf(theta);
-	return m;
-}
-
-Mat4 mat4_rotate_Z(float theta) {
-	Mat4 m = mat4_identity();
-	m.m[0][0] = cosf(theta);
-	m.m[0][1] = -sinf(theta);
-	m.m[1][0] = sinf(theta);
-	m.m[1][1] = cosf(theta);
-	return m;
-}
-
-Mat4 mat4_translate(Vec3 t) {
-	Mat4 m = mat4_identity();
-	m.m[0][3] = t.x;
-	m.m[1][3] = t.y;
-	m.m[2][3] = t.z;
-	return m;
-}
-
-Mat4 mat4_scale(float scaleX, float scaleY, float scaleZ) {
-	Mat4 m = mat4_identity();
-	m.m[0][0] = scaleX;
-	m.m[1][1] = scaleY;
-	m.m[2][2] = scaleZ;
-	return m;
-}
-
-Vec3 mat4_mult_vec3(Mat4 m, Vec3 p) {
-	Vec3 out = {0};
-	out.x = m.m[0][0]*p.x+m.m[0][1]*p.y+m.m[0][2]*p.z+m.m[0][3];
-	out.y = m.m[1][0]*p.x+m.m[1][1]*p.y+m.m[1][2]*p.z+m.m[1][3];
-	out.z = m.m[2][0]*p.x+m.m[2][1]*p.y+m.m[2][2]*p.z+m.m[2][3];
-	return out;
-}
-
-Vec4 mat4_mult_vec4(Mat4 m, Vec4 p) {
-	Vec4 out = {0};
-	out.x = m.m[0][0]*p.x+m.m[0][1]*p.y+m.m[0][2]*p.z+m.m[0][3]*p.w;
-	out.y = m.m[1][0]*p.x+m.m[1][1]*p.y+m.m[1][2]*p.z+m.m[1][3]*p.w;
-	out.z = m.m[2][0]*p.x+m.m[2][1]*p.y+m.m[2][2]*p.z+m.m[2][3]*p.w;
-	out.w = m.m[3][0]*p.x+m.m[3][1]*p.y+m.m[3][2]*p.z+m.m[3][3]*p.w;
-	return out;
 }
 
 typedef struct {
