@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -O2
 LDFLAGS = -lm
 
 TARGET = term-raster
-SRC = src/main.c src/vecmath.c
+SRC = src/main.c src/vecmath.c src/mesh.c
 
 all: $(TARGET)
 
